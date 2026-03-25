@@ -1,43 +1,66 @@
 # FlowLens
 
-**FlowLens** is a zero-configuration Spring Boot starter that automatically generates interactive sequence diagrams for every entry point in your application — REST endpoints, Kafka/RabbitMQ consumers, and scheduled tasks — using static bytecode analysis. No code changes, annotations, or runtime instrumentation required.
+[![Java](https://img.shields.io/badge/Java-17%2B-blue?logo=openjdk)](https://openjdk.org/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7%20%7C%203.x%20%7C%204.x-brightgreen?logo=springboot)](https://spring.io/projects/spring-boot)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
-![FlowLens Dashboard](https://github.com/user-attachments/assets/placeholder)
+> **Instant sequence diagrams for every endpoint in your Spring Boot app — zero code changes, zero instrumentation, zero configuration.**
 
----
-
-## How It Works
-
-When your application starts, FlowLens:
-
-1. **Scans all Spring beans** via `ApplicationContext` and discovers every `@RestController`, `@KafkaListener`, `@RabbitListener`, `@SqsListener`, and `@Scheduled` method.
-2. On demand (when you click an endpoint in the dashboard), performs **static bytecode analysis** (using Spring's embedded ASM) on that method and traces every call it makes through your services, repositories, and external clients.
-3. Renders the resulting call tree as a **Mermaid sequence diagram** inside the embedded Next.js dashboard, served directly from your running application at `/flow-lens/`.
-
-No agent, no proxy, no log parsing — just pure static analysis of your application's own bytecode.
+FlowLens is a Spring Boot starter that uses **static bytecode analysis** (via Spring's embedded ASM) to automatically generate interactive Mermaid sequence diagrams for every REST endpoint, Kafka/RabbitMQ consumer, and scheduled task in your application. Just add the dependency and open your browser.
 
 ---
 
-## Requirements
+## Table of Contents
 
-| Requirement | Version |
-|---|---|
-| Java | **17+** |
-| Spring Boot | **2.7.x, 3.x, or 4.x** |
-| Spring Web (MVC) | required (servlet stack) |
-| Spring WebSocket | required (included transitively) |
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Dashboard](#dashboard)
+- [How It Works](#how-it-works)
+- [Discovered Entry Points](#discovered-entry-points)
+- [Sequence Diagram Contents](#sequence-diagram-contents)
+- [External System Detection](#external-system-detection)
+- [Configuration](#configuration)
+- [Context Path Support](#context-path-support)
+- [Security](#security)
+- [REST API Reference](#rest-api-reference)
+- [Building from Source](#building-from-source)
+- [Limitations](#limitations)
+- [License](#license)
 
-> FlowLens only works with the **servlet stack** (`spring-boot-starter-web`). Reactive / WebFlux applications are not supported.
->
-> **Spring Boot 2.6 and below are not supported.** The `@AutoConfiguration` annotation and the auto-configuration imports file (`META-INF/spring/...`) were both introduced in Spring Boot 2.7.
+---
+
+## Quick Start
+
+**1. Add the dependency:**
+
+```xml
+<!-- Maven -->
+<dependency>
+    <groupId>com.dnlabz.flowlens</groupId>
+    <artifactId>flowlens-spring-boot-starter</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+```kotlin
+// Gradle (Kotlin DSL)
+implementation("com.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
+```
+
+**2. Start your application and open:**
+
+```
+http://localhost:8080/flow-lens/
+```
+
+That's it. No `@Enable*` annotations. No properties. No extra beans.
 
 ---
 
 ## Installation
 
-### 1. Add the dependency
+### Maven
 
-**Maven (`pom.xml`):**
 ```xml
 <dependency>
     <groupId>com.dnlabz.flowlens</groupId>
@@ -46,132 +69,268 @@ No agent, no proxy, no log parsing — just pure static analysis of your applica
 </dependency>
 ```
 
-**Gradle (`build.gradle.kts`):**
+### Gradle (Kotlin DSL)
+
 ```kotlin
 implementation("com.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
 ```
 
-**Gradle (`build.gradle`):**
+### Gradle (Groovy DSL)
+
 ```groovy
 implementation 'com.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0'
 ```
 
-### 2. Publish to your local Maven repo (if building from source)
+### Requirements
+
+| Dependency | Version |
+|---|---|
+| Java | **17 or later** |
+| Spring Boot | **2.7.x, 3.x, or 4.x** |
+| Spring Web MVC | Required — servlet stack only |
+
+> ⚠️ **WebFlux / reactive stack is not supported.** FlowLens requires `spring-boot-starter-web` (servlet-based).
+>
+> Spring Boot 2.6 and earlier are not supported.
+
+### Installing from Source
 
 ```bash
 git clone https://github.com/your-org/flow-lens.git
 cd flow-lens
-./gradlew :starter:publishToMavenLocal
+./gradlew :starter:clean :starter:publishToMavenLocal
 ```
 
-Then add `mavenLocal()` to your project's repositories block:
+Add `mavenLocal()` to your project's `repositories` block:
 
 ```kotlin
-// settings.gradle.kts or build.gradle.kts
 repositories {
     mavenLocal()
     mavenCentral()
 }
 ```
 
-### 3. That's it
+---
 
-No `@EnableFlowLens`, no properties, no extra beans. Spring Boot's auto-configuration kicks in automatically. Start your application and open:
+## Dashboard
+
+Once the application is running, navigate to:
 
 ```
 http://localhost:8080/flow-lens/
 ```
 
----
+The dashboard is fully embedded inside the JAR — no separate process, no external CDN, no network calls.
 
-## Dashboard
+### Layout
 
-The FlowLens dashboard is embedded inside the JAR and served as static resources at the `/flow-lens/` path. It has three panels:
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Toolbar: [ ▶ Step Flow ]  [ − 100% + ]  [ 📋 Copy ]        │
+├─────────────────────┬────────────────────────────────────────┤
+│                     │                                        │
+│   Endpoint List     │        Sequence Diagram                │
+│                     │                                        │
+│  ▸ UserController   │   sequenceDiagram                      │
+│  ▸ OrderController  │     Client ->>  UserService: GET /...  │
+│  ▸ OrderConsumer    │     UserService ->>+ UserRepo: find()  │
+│                     │     UserRepo -->-> PostgreSQL: query() │
+│                     │                                        │
+└─────────────────────┴────────────────────────────────────────┘
+```
 
-| Panel | Description |
+### Endpoint List (left sidebar)
+
+- **Grouped by controller / class** — groups are **collapsed by default**; click a group header to expand
+- **Filter by type** using the tabs: `All`, `API`, `Consumer`, `Scheduler`
+- Click any endpoint to generate and display its sequence diagram
+
+### Sequence Diagram (main area)
+
+- **Zoom** — `+` / `−` buttons or scroll wheel
+- **Pan** — click and drag
+- **Copy** — copies the raw Mermaid source to clipboard
+
+### Step Flow Mode
+
+Click **▶ Step Flow** to walk through the diagram one interaction at a time:
+
+| Control | Action |
 |---|---|
-| **Endpoint list** (left sidebar) | All discovered entry points, grouped by controller/class. Groups are **collapsed by default** — click a group header to expand it. Filter by type (API / Consumer / Scheduler) using the tabs at the top. |
-| **Sequence diagram** (main area) | Auto-generated Mermaid sequence diagram for the selected endpoint |
-| **Toolbar** | Zoom in/out, drag-to-pan, Copy Mermaid code, Step Flow mode |
-
-### Step Flow mode
-
-Click **▶ Step Flow** to walk through the diagram one call at a time. Use the **Prev / Next** buttons, keyboard arrow keys, or hit **Play** to auto-advance. Speed can be set to 0.5×, 1×, or 2×.
+| `◀ Prev` / `Next ▶` | Step backward / forward |
+| `▶ Play` / `⏸ Pause` | Auto-advance / pause |
+| `← →` or `Space` | Keyboard shortcuts |
+| `0.5×` `1×` `2×` | Playback speed |
 
 ---
 
-## What Gets Discovered
+## How It Works
 
-FlowLens scans for the following entry point types at startup:
+FlowLens performs two phases entirely at startup — no runtime overhead on your hot path.
 
-### API — HTTP Endpoints
-Methods on beans annotated with `@RestController` or `@Controller` that carry HTTP mapping annotations:
-- `@GetMapping`, `@PostMapping`, `@PutMapping`, `@PatchMapping`, `@DeleteMapping`, `@RequestMapping`
+**Phase 1 — Endpoint Discovery (at application start)**
 
-The following paths are automatically excluded (Swagger UI, OpenAPI spec, Spring Actuator):
-- `/swagger-ui/**`, `/v2/api-docs`, `/v3/api-docs`, `/api-docs/**`
-- `/webjars/**`
-- `/actuator/**`, `/error`
+FlowLens iterates all beans in the `ApplicationContext`, unwraps CGLIB/ByteBuddy proxies to their real target class, and registers any method that carries a recognized entry-point annotation (`@GetMapping`, `@KafkaListener`, `@Scheduled`, etc.).
+
+**Phase 2 — Bytecode Analysis (on first diagram request)**
+
+When you click an endpoint in the dashboard, FlowLens reads the compiled `.class` file for that method and performs a depth-first traversal:
+
+1. Loads bytecode with `ClassLoader.getResourceAsStream()`
+2. Uses ASM `MethodVisitor` to walk every `INVOKE*` instruction
+3. Resolves interface / abstract type to the concrete Spring bean via `ApplicationContext`
+4. Recursively follows internal bean-to-bean calls up to 12 levels deep
+5. Detects calls to external systems (databases, REST clients, Kafka, Redis, etc.) and names them using any string literals captured from the bytecode (URLs, topic names, workflow names)
+6. Builds a `CallNode` tree and converts it to a Mermaid `sequenceDiagram` string
+7. Results are memoised — repeated requests for the same endpoint are instant
+
+```
+Your code (.class files in classpath)
+             │
+             ▼
+  StaticCallAnalyzer  ◄──  Spring ASM (bundled)
+             │
+             ▼
+       CallNode tree
+             │
+             ▼
+    MermaidGenerator
+             │
+             ▼
+  sequenceDiagram string  ──►  Dashboard (Mermaid.js)
+```
+
+---
+
+## Discovered Entry Points
+
+FlowLens detects three types of entry points at startup:
+
+### REST / HTTP (`type: API`)
+
+Any `@RestController` or `@Controller` method with a request mapping annotation:
+
+```java
+@GetMapping("/users/{id}")
+public UserDto getUser(@PathVariable Long id) { … }
+
+@PostMapping("/orders")
+public ResponseEntity<Order> createOrder(@RequestBody OrderRequest req) { … }
+```
+
+**Auto-excluded paths** (Swagger UI, OpenAPI spec, Spring Actuator):
+
+| Excluded prefix | Reason |
+|---|---|
+| `/swagger-ui/**`, `/swagger/**` | Springfox / SpringDoc UI |
+| `/v2/api-docs`, `/v3/api-docs`, `/api-docs/**` | OpenAPI spec endpoints |
+| `/webjars/**` | Static web assets |
+| `/actuator/**` | Spring Boot Actuator |
+| `/error` | Spring default error controller |
 
 Beans from `org.springdoc`, `springfox`, and `io.swagger` packages are also skipped entirely.
 
-### Consumer — Message Listeners
-Methods annotated with any of:
-- `@KafkaListener` (Spring Kafka)
-- `@RabbitListener` (Spring AMQP)
-- `@SqsListener` (Spring Cloud AWS)
-- `@JmsListener` (Spring JMS)
+### Message Consumers (`type: CONSUMER`)
 
-### Scheduler — Scheduled Tasks
-Methods annotated with `@Scheduled`.
+| Annotation | Broker |
+|---|---|
+| `@KafkaListener` / `@KafkaListeners` | Apache Kafka (Spring Kafka) |
+| `@RabbitListener` / `@RabbitListeners` | RabbitMQ (Spring AMQP) |
+| `@SqsListener` | AWS SQS (Spring Cloud AWS) |
+
+### Scheduled Tasks (`type: SCHEDULER`)
+
+Any method annotated with `@Scheduled`.
 
 ---
 
-## What Gets Shown in the Diagram
+## Sequence Diagram Contents
 
-The sequence diagram shows calls between **Spring-managed beans** only. FlowLens automatically filters out:
+### Internal participants
 
-- Framework internals (`org.springframework.*`, `org.hibernate.*`, `reactor.*`, `io.netty.*`, etc.)
-- JDK classes (`java.*`, `javax.*`, `jakarta.*`, `sun.*`)
-- Data/DTO classes (any class in `.entity.`, `.dto.`, `.model.`, `.vo.` packages, or with those suffixes)
-- Utility/mapper/config classes
-- Third-party libraries (Jackson, BouncyCastle, gRPC stubs, etc.)
-- Participants that were collected but have no arrows pointing to them (dead participants are pruned automatically)
+Any Spring-managed bean that is directly or transitively called by the entry point method is shown as a labelled participant. FlowLens automatically:
 
-### External system participants
+- **Flattens self-calls** — private helper methods on the same class are not shown as separate participants; their external calls surface under the calling participant
+- **Deduplicates** — if the same external system is called multiple times, it appears as one participant
+- **Prunes unused participants** — any participant declared but with no arrows pointing to it is automatically removed
 
-Boundary systems are shown as **named participants** — FlowLens tries to extract the most specific name available via static bytecode analysis:
+### Filtered out (never shown)
 
-| System | Participant label | How detected |
+- Spring framework internals (`org.springframework.*`, `org.hibernate.*`, `reactor.*`, `io.netty.*`, …)
+- JDK / JVM classes (`java.*`, `javax.*`, `jakarta.*`, `sun.*`)
+- DTOs, entities, model objects (packages or names containing `.dto.`, `.entity.`, `.model.`, `.vo.`)
+- Configuration / properties beans
+- Third-party libraries (Jackson, BouncyCastle, protobuf, Micrometer, …)
+
+---
+
+## External System Detection
+
+External boundary systems are represented as **named participants**. FlowLens extracts the most specific name available from bytecode and application properties.
+
+### Detection table
+
+| System | Example participant | How detected |
 |---|---|---|
-| **Database** | `PostgreSQL`, `MySQL`, `H2`, … | Reads `spring.datasource.url` / `spring.datasource.driver-class-name` / `spring.r2dbc.url` at startup; falls back to `Database` |
-| **REST / HTTP** | `payments.acme.com`, `payment-service`, … | URL string literal → host extracted; `@FeignClient(name=…)` or `url=…` attribute; `@Value("${prop}")` field resolved from `application.properties` |
-| **Kafka** | `topic:order-events`, … | Topic string literal passed to `KafkaTemplate.send()` |
-| **Messaging (AMQP/SQS/SNS)** | `queue:order-queue`, … | Queue/exchange name string literal |
-| **Cadence / Temporal** | `OrderWorkflow [Cadence]`, … | Workflow name string passed to stub/client |
+| **Database** | `PostgreSQL`, `MySQL`, `H2` | Reads `spring.datasource.url` / `driver-class-name` / `spring.r2dbc.url` / `spring.cassandra.contact-points` |
+| **REST / HTTP** | `payments.acme.com`, `payment-service` | See resolution chain below |
+| **Kafka** | `topic:order-events` | Topic string literal passed to `KafkaTemplate.send()` |
+| **RabbitMQ / SQS / SNS** | `queue:order-queue` | Queue / exchange / routing-key string literal |
+| **Cadence** | `OrderWorkflow [Cadence]` | Workflow/activity name string passed to `WorkflowClient` |
+| **Temporal** | `ShipmentWorkflow [Temporal]` | Workflow name string passed to `WorkflowClient` |
 | **Redis** | `Redis` | `RedisTemplate`, Lettuce, Jedis, Redisson |
 | **Elasticsearch** | `Elasticsearch` | `ElasticsearchOperations`, Elastic Java client |
-| **MongoDB** | `MongoDB` | `MongoTemplate` |
-| **gRPC** | gRPC stub class name | gRPC stub suffix detection |
+| **MongoDB** | `MongoDB` | `MongoTemplate`, `ReactiveMongoTemplate` |
+| **gRPC** | stub class name | gRPC stub class suffix detection |
 
-#### REST service name resolution (in priority order)
+### REST service name resolution
 
-1. Absolute URL literal in the call: `restTemplate.getForEntity("https://payments.acme.com/v1/pay", ...)` → `payments.acme.com`
-2. `@FeignClient(url = "https://...")` → host extracted from the URL
-3. `@FeignClient(name = "payment-service")` or `value = "…"` → service name used as-is
-4. `@Value("${payment.service.url}") String baseUrl` field → property resolved at startup, host extracted
-5. `baseUrl + "/path"` (Java string concatenation) → host from `baseUrl` preserved through concat
-6. Fallback: `External API` (when no URL or name can be determined)
+Resolution is attempted in this priority order:
 
-> **Inherent limits of static analysis:** URLs built entirely at runtime (e.g. from a method return value, environment variable read in a constructor, or dynamic service discovery via Eureka/Consul) cannot be resolved. FlowLens will fall back to `External API` in those cases.
+| Priority | Pattern | Example → Result |
+|---|---|---|
+| 1 | Absolute URL string literal | `"https://payments.acme.com/v1"` → `payments.acme.com` |
+| 2 | `@FeignClient(url = "https://…")` | URL host extracted from annotation |
+| 3 | `@FeignClient(name = "payment-service")` | `payment-service` |
+| 4 | `@Value("${svc.url}") String baseUrl` field | Property resolved from `Environment`, host extracted |
+| 5 | `baseUrl + "/path"` string concat | Host carried through `makeConcatWithConstants` |
+| 6 | Fallback | `External API` |
+
+> **Static analysis limits:** URLs resolved at runtime from method return values, environment variables set outside `application.properties`, or service-discovery registries (Eureka, Consul) cannot be determined statically and will fall back to `External API`.
+
+---
+
+## Configuration
+
+FlowLens works out of the box with no required properties. It reads standard Spring properties automatically for database name detection (`spring.datasource.*`, `spring.r2dbc.*`, etc.).
+
+### Disable FlowLens
+
+To exclude FlowLens in a specific profile (e.g. production), use Spring Boot's auto-configuration exclusion:
+
+```properties
+# application-prod.properties
+spring.autoconfigure.exclude=com.dnlabz.flowlens.starter.config.FlowLensAutoConfiguration
+```
+
+Or, with Gradle's `developmentOnly` scope (ensures it never goes to production):
+
+```kotlin
+// build.gradle.kts
+developmentOnly("com.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
+```
 
 ---
 
 ## Context Path Support
 
-If your application sets a `server.servlet.context-path`, FlowLens detects it automatically. All API calls and WebSocket connections inside the dashboard are derived from `window.location`, so the dashboard works correctly regardless of the base path.
+If your application uses `server.servlet.context-path`, FlowLens detects it automatically via `window.location` — no extra configuration needed.
 
-For example, if your context path is `/my-service`:
+```properties
+server.servlet.context-path=/my-service
+```
+
+Dashboard URL becomes:
 
 ```
 http://localhost:8080/my-service/flow-lens/
@@ -179,9 +338,35 @@ http://localhost:8080/my-service/flow-lens/
 
 ---
 
-## API Reference
+## Security
 
-FlowLens exposes a small internal REST API (used by the dashboard). You can call it directly if needed.
+> ⚠️ **FlowLens is for development and internal tooling only.** It exposes your application's internal call structure. Never expose `/flow-lens/**` to untrusted networks.
+
+### Restricting access with Spring Security
+
+```java
+@Bean
+SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    return http
+        .authorizeHttpRequests(auth -> auth
+            .requestMatchers("/flow-lens/**").hasRole("ADMIN")
+            .anyRequest().authenticated()
+        )
+        .build();
+}
+```
+
+### Permit all (internal-only deployments behind a VPN)
+
+```java
+.requestMatchers("/flow-lens/**").permitAll()
+```
+
+---
+
+## REST API Reference
+
+The dashboard communicates with these internal endpoints. You can also call them directly for scripting or CI.
 
 | Method | Path | Description |
 |---|---|---|
@@ -195,17 +380,12 @@ FlowLens exposes a small internal REST API (used by the dashboard). You can call
 fully.qualified.ClassName#methodName
 ```
 
-Example:
-```
-com.example.myapp.controller.UserController#getUser
-```
-
 ### `GET /flow-lens/api/endpoints` — Response
 
 ```json
 [
   {
-    "id": "com.example.myapp.controller.UserController#getUser",
+    "id": "com.example.app.controller.UserController#getUser",
     "type": "API",
     "label": "GET /api/users/{id}",
     "className": "UserController",
@@ -213,7 +393,7 @@ com.example.myapp.controller.UserController#getUser
     "group": "UserController"
   },
   {
-    "id": "com.example.myapp.listener.OrderListener#onOrderPlaced",
+    "id": "com.example.app.listener.OrderListener#onOrderPlaced",
     "type": "CONSUMER",
     "label": "OrderListener.onOrderPlaced",
     "className": "OrderListener",
@@ -223,103 +403,96 @@ com.example.myapp.controller.UserController#getUser
 ]
 ```
 
+**`type` values:** `API` | `CONSUMER` | `SCHEDULER`
+
 ### `GET /flow-lens/api/diagram?id=...` — Response
 
 ```json
 {
-  "diagram": "sequenceDiagram\n  participant OrderController\n  participant OrderService\n  ...",
-  "label": "POST /api/orders",
+  "diagram": "sequenceDiagram\n  participant Client\n  participant UserController\n  ...",
+  "label": "GET /api/users/{id}",
   "type": "API"
 }
 ```
 
-The `diagram` value is a valid Mermaid `sequenceDiagram` definition.
-
----
-
-## Security Considerations
-
-The FlowLens dashboard and API are intended for **development and internal environments only**.
-
-If you use Spring Security, the `/flow-lens/**` paths will be protected by whatever security rules you have configured. You may want to explicitly permit them for internal tooling:
-
-```java
-@Bean
-SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-    return http
-        .authorizeHttpRequests(auth -> auth
-            .requestMatchers("/flow-lens/**").hasRole("DEVELOPER")
-            // ... other rules
-        )
-        .build();
-}
-```
-
-Or, to restrict FlowLens to local access only, add this to `application.properties`:
-
-```properties
-# Only allow FlowLens in non-production profiles
-spring.autoconfigure.exclude=\
-  com.dnlabz.flowlens.starter.config.FlowLensAutoConfiguration
-```
-
-> **Do not expose `/flow-lens/` to the public internet.** It reveals internal application structure.
+The `diagram` field is a valid Mermaid `sequenceDiagram` string, ready to be passed directly to `mermaid.render()`.
 
 ---
 
 ## Building from Source
 
+### Prerequisites
+
+- Java 17+
+- Node.js 18+ (for the embedded Next.js frontend)
+- Gradle wrapper included (`./gradlew`)
+
+### Build and install locally
+
 ```bash
-# Clone the repository
 git clone https://github.com/your-org/flow-lens.git
 cd flow-lens
 
-# Build and install the starter to ~/.m2
+# Build the starter JAR and install to ~/.m2/repository
 ./gradlew :starter:clean :starter:publishToMavenLocal
-
-# The frontend is automatically built and embedded into the JAR during the Gradle build.
-# Requires Node.js 18+ on the PATH.
 ```
 
-### Project Structure
+The Gradle build automatically:
+1. Runs `npm ci && npm run build` inside `frontend/`
+2. Copies the Next.js static export into `starter/src/main/resources/META-INF/resources/flow-lens/`
+3. Compiles the Java source and packages everything into the JAR
+
+### Project structure
 
 ```
 flow-lens/
-├── starter/                            # The Spring Boot starter (what you add as a dependency)
+├── starter/                              # Spring Boot starter (the published artifact)
+│   ├── build.gradle.kts
 │   └── src/main/java/com/dnlabz/flowlens/starter/
 │       ├── analysis/
-│       │   ├── StaticCallAnalyzer.java # ASM bytecode traversal + call tree builder
-│       │   └── MermaidGenerator.java   # Converts CallNode tree → Mermaid syntax
+│       │   ├── StaticCallAnalyzer.java   # ASM bytecode walker + call tree builder
+│       │   ├── MermaidGenerator.java     # CallNode tree → Mermaid sequenceDiagram
+│       │   ├── CallNode.java             # Call tree node
+│       │   └── MethodCallInfo.java       # Per-instruction metadata (record)
 │       ├── config/
-│       │   └── FlowLensAutoConfiguration.java  # Spring Boot auto-configuration
+│       │   └── FlowLensAutoConfiguration.java
 │       ├── discovery/
-│       │   └── EndpointDiscovery.java  # Scans Spring beans for entry points
-│       ├── model/                      # DiscoveredEndpoint, EntryPointType, etc.
-│       ├── store/                      # In-memory TraceStore (live traces)
-│       ├── aspect/                     # FlowLensAspect (AOP tracing)
+│       │   └── EndpointDiscovery.java    # Entry-point scanner
+│       ├── model/
+│       │   ├── DiscoveredEndpoint.java
+│       │   └── EntryPointType.java
 │       └── web/
-│           ├── FlowLensController.java # REST API
-│           └── FlowLensWebSocketHandler.java   # WebSocket for live status
-└── frontend/                           # Next.js dashboard (embedded in the JAR)
+│           └── FlowLensController.java   # REST API endpoints
+│
+└── frontend/                             # Next.js dashboard (embedded in JAR)
+    ├── package.json
     └── src/
-        ├── app/page.tsx                # Main dashboard page
+        ├── app/page.tsx                  # Main dashboard page
         └── components/
-            ├── MermaidDiagram.tsx      # Diagram viewer with zoom, pan, step-flow
-            └── TraceList.tsx           # Endpoint list sidebar
+            ├── MermaidDiagram.tsx        # Diagram viewer (zoom, pan, step-flow)
+            └── TraceList.tsx             # Endpoint list sidebar
 ```
 
 ---
 
 ## Limitations
 
-- **Static analysis only** — the diagram shows the call graph as seen in bytecode. Branches inside `if/else` blocks are included even if only one path executes at runtime.
-- **Proxy-transparent** — Spring AOP CGLIB/ByteBuddy proxies are unwrapped to the real class before analysis.
-- **Depth cap** — analysis stops at 12 call levels deep to avoid infinite recursion in complex graphs.
-- **Max children** — each method shows at most 30 unique callees to keep diagrams readable.
-- **No reactive support** — WebFlux / Project Reactor applications are not supported.
+| Limitation | Detail |
+|---|---|
+| **Static analysis only** | Both branches of an `if/else` appear in the diagram regardless of what actually runs at runtime. |
+| **No WebFlux support** | Reactive / Project Reactor pipelines are not traversed. |
+| **Depth cap** | Analysis stops at **12 call levels** deep to prevent runaway traversal. |
+| **Max callees per method** | At most **30 unique callees** per method to keep diagrams readable. |
+| **Dynamic URLs** | URLs computed at runtime show as `External API`. |
+| **Lambda / method reference bodies** | Calls inside lambdas and method references are not traversed. |
+| **Off-classpath modules** | Classes not loadable from the context class loader at analysis time are silently skipped. |
 
 ---
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Licensed under the **Apache License, Version 2.0** — see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">Made for developers who want to understand their own codebase — instantly.</p>
