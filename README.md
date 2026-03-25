@@ -2,6 +2,7 @@
 
 [![Java](https://img.shields.io/badge/Java-17%2B-blue?logo=openjdk)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7%20%7C%203.x%20%7C%204.x-brightgreen?logo=springboot)](https://spring.io/projects/spring-boot)
+[![Maven Central](https://img.shields.io/maven-central/v/cloud.dnlabz.flowlens/flowlens-spring-boot-starter)](https://central.sonatype.com/artifact/cloud.dnlabz.flowlens/flowlens-spring-boot-starter)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 > **Instant sequence diagrams for every endpoint in your Spring Boot app — zero code changes, zero instrumentation, zero configuration.**
@@ -36,7 +37,7 @@ FlowLens is a Spring Boot starter that uses **static bytecode analysis** (via Sp
 ```xml
 <!-- Maven -->
 <dependency>
-    <groupId>com.dnlabz.flowlens</groupId>
+    <groupId>cloud.dnlabz.flowlens</groupId>
     <artifactId>flowlens-spring-boot-starter</artifactId>
     <version>1.0.0</version>
 </dependency>
@@ -44,7 +45,7 @@ FlowLens is a Spring Boot starter that uses **static bytecode analysis** (via Sp
 
 ```kotlin
 // Gradle (Kotlin DSL)
-implementation("com.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
+implementation("cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
 ```
 
 **2. Start your application and open:**
@@ -63,7 +64,7 @@ That's it. No `@Enable*` annotations. No properties. No extra beans.
 
 ```xml
 <dependency>
-    <groupId>com.dnlabz.flowlens</groupId>
+    <groupId>cloud.dnlabz.flowlens</groupId>
     <artifactId>flowlens-spring-boot-starter</artifactId>
     <version>1.0.0</version>
 </dependency>
@@ -72,13 +73,13 @@ That's it. No `@Enable*` annotations. No properties. No extra beans.
 ### Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("com.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
+implementation("cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
 ```
 
 ### Gradle (Groovy DSL)
 
 ```groovy
-implementation 'com.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0'
+implementation 'cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0'
 ```
 
 ### Requirements
@@ -96,7 +97,7 @@ implementation 'com.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0'
 ### Installing from Source
 
 ```bash
-git clone https://github.com/your-org/flow-lens.git
+git clone https://github.com/dnlabz/flow-lens.git
 cd flow-lens
 ./gradlew :starter:clean :starter:publishToMavenLocal
 ```
@@ -310,14 +311,14 @@ To exclude FlowLens in a specific profile (e.g. production), use Spring Boot's a
 
 ```properties
 # application-prod.properties
-spring.autoconfigure.exclude=com.dnlabz.flowlens.starter.config.FlowLensAutoConfiguration
+spring.autoconfigure.exclude=cloud.dnlabz.flowlens.starter.config.FlowLensAutoConfiguration
 ```
 
 Or, with Gradle's `developmentOnly` scope (ensures it never goes to production):
 
 ```kotlin
 // build.gradle.kts
-developmentOnly("com.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
+developmentOnly("cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
 ```
 
 ---
@@ -430,7 +431,7 @@ The `diagram` field is a valid Mermaid `sequenceDiagram` string, ready to be pas
 ### Build and install locally
 
 ```bash
-git clone https://github.com/your-org/flow-lens.git
+git clone https://github.com/dnlabz/flow-lens.git
 cd flow-lens
 
 # Build the starter JAR and install to ~/.m2/repository
