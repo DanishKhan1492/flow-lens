@@ -246,8 +246,20 @@ public class StaticCallAnalyzer implements ApplicationContextAware {
             return;
         }
 
-        // 4. Framework / library class that is NOT a known external service → skip entirely
-        if (isFrameworkClass(owner)) return;
+        // 4. Framework / library class that is NOT a known external service.
+        //    Before skipping entirely, check if this is a super-class / library
+        //    method whose name implies a specific external-system intent (e.g.
+        //    super.save(), super.update(), super.publish() called on a base
+        //    repository or messaging class from a dependency JAR).
+        if (isFrameworkClass(owner)) {
+            CallNode.Kind intentKind = detectIntentFromMethodName(call.name, owner);
+            if (intentKind != null) {
+                String label = (intentKind == CallNode.Kind.DATABASE) ? getDatabaseName()
+                             : kindLabel(intentKind);
+                addExternalNode(parent, call, intentKind, label, call.ldcArg());
+            }
+            return;
+        }
 
         // 5. Spring Data repository interface → DATABASE leaf (collapsed to single named participant)
         if (isSpringDataRepository(dotForm)) {
@@ -645,6 +657,130 @@ public class StaticCallAnalyzer implements ApplicationContextAware {
             || owner.startsWith("com/zaxxer/");
     }
 
+    /**
+     * Infers an external-system {@link CallNode.Kind} from a method name when
+     * the callee class itself is a library/framework type (and therefore not in
+     * {@link #OWNER_TO_KIND}).  This handles patterns such as:
+     * <ul>
+     *   <li>{@code super.save()} / {@code super.update()} on a base-repository class → DATABASE</li>
+     *   <li>{@code super.send()} / {@code super.publish()} on a base-messaging class → KAFKA/MESSAGING</li>
+     *   <li>{@code super.set()} / {@code super.get()} on a base-cache class → REDIS</li>
+     * </ul>
+     * Returns {@code null} when the method name carries no recognisable intent.
+     */
+    private static CallNode.Kind detectIntentFromMethodName(String methodName, String ownerSlash) {
+        // ── Persistence / database intent ─────────────────────────────────────
+        // Common method names that almost always mean "write to the primary store"
+        if (methodName.equals("save")
+         || methodName.equals("saveAll")
+         || methodName.equals("saveAndFlush")
+         || methodName.equals("persist")
+         || methodName.equals("merge")
+         || methodName.equals("flush")
+         || methodName.equals("create")     // only when on a repo/DAO base
+         || methodName.equals("update")
+         || methodName.equals("updateAll")
+         || methodName.equals("delete")
+         || methodName.equals("deleteById")
+         || methodName.equals("deleteAll")
+         || methodName.equals("deleteInBatch")
+         || methodName.equals("remove")
+         || methodName.equals("insert")
+         || methodName.equals("upsert")
+         || methodName.startsWith("findAll")
+         || methodName.startsWith("findBy")
+         || methodName.startsWith("existsBy")
+         || methodName.startsWith("countBy")
+         || methodName.startsWith("deleteBy")) {
+            // Confirm the owner is a data-layer class by checking the package.
+            // We don't want to mark random library "create()" or "delete()" methods.
+            if (isDataLayerOwner(ownerSlash)) return CallNode.Kind.DATABASE;
+        }
+
+        // ── Kafka / messaging intent ──────────────────────────────────────────
+        if (methodName.equals("send")
+         || methodName.equals("sendDefault")
+         || methodName.equals("sendMessage")
+         || methodName.equals("publish")
+         || methodName.equals("publishMessage")
+         || methodName.equals("produce")) {
+            if (isMessagingOwner(ownerSlash)) return CallNode.Kind.KAFKA_PRODUCE;
+        }
+
+        // ── Redis / cache intent ──────────────────────────────────────────────
+        if (methodName.equals("set")
+         || methodName.equals("get")
+         || methodName.equals("getAndSet")
+         || methodName.equals("setIfAbsent")
+         || methodName.equals("expire")
+         || methodName.equals("evict")
+         || methodName.equals("put")
+         || methodName.equals("putAll")
+         || methodName.equals("putIfAbsent")) {
+            if (isCacheOwner(ownerSlash)) return CallNode.Kind.REDIS;
+        }
+
+        return null;
+    }
+
+    private static boolean isDataLayerOwner(String ownerSlash) {
+        return ownerSlash.contains("repository")
+            || ownerSlash.contains("Repository")
+            || ownerSlash.contains("dao")
+            || ownerSlash.contains("Dao")
+            || ownerSlash.contains("persistence")
+            || ownerSlash.contains("jpa")
+            || ownerSlash.contains("hibernate")
+            || ownerSlash.contains("jdbc")
+            || ownerSlash.contains("mongo")
+            || ownerSlash.contains("elastic")
+            || ownerSlash.contains("cassandra")
+            || ownerSlash.contains("r2dbc");
+    }
+
+    private static boolean isMessagingOwner(String ownerSlash) {
+        return ownerSlash.contains("kafka")
+            || ownerSlash.contains("Kafka")
+            || ownerSlash.contains("rabbit")
+            || ownerSlash.contains("Rabbit")
+            || ownerSlash.contains("amqp")
+            || ownerSlash.contains("Amqp")
+            || ownerSlash.contains("sqs")
+            || ownerSlash.contains("Sqs")
+            || ownerSlash.contains("sns")
+            || ownerSlash.contains("messaging")
+            || ownerSlash.contains("Messaging");
+    }
+
+    private static boolean isCacheOwner(String ownerSlash) {
+        return ownerSlash.contains("redis")
+            || ownerSlash.contains("Redis")
+            || ownerSlash.contains("cache")
+            || ownerSlash.contains("Cache")
+            || ownerSlash.contains("jedis")
+            || ownerSlash.contains("lettuce")
+            || ownerSlash.contains("redisson");
+    }
+
+    /**
+     * Returns a human-readable label for an external-system kind.
+     * Used when the call carries no specific topic/URL/name to display.
+     */
+    private static String kindLabel(CallNode.Kind kind) {
+        return switch (kind) {
+            case DATABASE      -> "Database";
+            case REDIS         -> "Redis";
+            case KAFKA_PRODUCE -> "Kafka";
+            case MESSAGING     -> "Messaging";
+            case CADENCE       -> "Cadence";
+            case TEMPORAL      -> "Temporal";
+            case ELASTICSEARCH -> "Elasticsearch";
+            case MONGODB       -> "MongoDB";
+            case GRPC          -> "gRPC";
+            default            -> kind.name();
+        };
+    }
+
     private static boolean isSpringDataRepository(String dotForm) {
         try {
             Class<?> cls = Class.forName(dotForm, false,
@@ -895,22 +1031,6 @@ public class StaticCallAnalyzer implements ApplicationContextAware {
 
         } catch (Exception ignored) { /* context not ready or property not available */ }
         return "Database";
-    }
-
-    private static String kindLabel(CallNode.Kind kind) {
-        return switch (kind) {
-            case REST_CALL      -> "External_API";
-            case KAFKA_PRODUCE  -> "Kafka";
-            case REDIS          -> "Redis";
-            case DATABASE       -> "Database";
-            case CADENCE        -> "Cadence";
-            case TEMPORAL       -> "Temporal";
-            case ELASTICSEARCH  -> "Elasticsearch";
-            case MONGODB        -> "MongoDB";
-            case GRPC           -> "gRPC";
-            case MESSAGING      -> "Messaging";
-            default             -> "External";
-        };
     }
 
     // ── Inner record ───────────────────────────────────────────────────────────

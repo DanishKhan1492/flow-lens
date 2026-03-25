@@ -39,13 +39,13 @@ FlowLens is a Spring Boot starter that uses **static bytecode analysis** (via Sp
 <dependency>
     <groupId>cloud.dnlabz.flowlens</groupId>
     <artifactId>flowlens-spring-boot-starter</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 
 ```kotlin
 // Gradle (Kotlin DSL)
-implementation("cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
+implementation("cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.1.0")
 ```
 
 **2. Start your application and open:**
@@ -66,20 +66,20 @@ That's it. No `@Enable*` annotations. No properties. No extra beans.
 <dependency>
     <groupId>cloud.dnlabz.flowlens</groupId>
     <artifactId>flowlens-spring-boot-starter</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 
 ### Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
+implementation("cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.1.0")
 ```
 
 ### Gradle (Groovy DSL)
 
 ```groovy
-implementation 'cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0'
+implementation 'cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.1.0'
 ```
 
 ### Requirements
@@ -318,7 +318,7 @@ Or, with Gradle's `developmentOnly` scope (ensures it never goes to production):
 
 ```kotlin
 // build.gradle.kts
-developmentOnly("cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.0.0")
+developmentOnly("cloud.dnlabz.flowlens:flowlens-spring-boot-starter:1.1.0")
 ```
 
 ---
@@ -486,6 +486,7 @@ flow-lens/
 | **Max callees per method** | At most **30 unique callees** per method to keep diagrams readable. |
 | **Dynamic URLs** | URLs computed at runtime show as `External API`. |
 | **Lambda / method reference bodies** | Calls inside lambdas and method references are not traversed. |
+| **Async / threaded calls** | Code executed inside `CompletableFuture`, `new Thread(...)`, `@Async` methods, or submitted to an `Executor` / thread pool is **not traced**. Only the call chain on the original request thread is captured; any work handed off to another thread will not appear in the sequence diagram. |
 | **Off-classpath modules** | Classes not loadable from the context class loader at analysis time are silently skipped. |
 
 ---

@@ -3,6 +3,7 @@ package com.dnlabz.flowlens.starter.config;
 import com.dnlabz.flowlens.starter.analysis.MermaidGenerator;
 import com.dnlabz.flowlens.starter.analysis.StaticCallAnalyzer;
 import com.dnlabz.flowlens.starter.aspect.FlowLensAspect;
+import com.dnlabz.flowlens.starter.aspect.FlowLensExecutorAspect;
 import com.dnlabz.flowlens.starter.discovery.EndpointDiscovery;
 import com.dnlabz.flowlens.starter.store.TraceStore;
 import com.dnlabz.flowlens.starter.web.FlowLensController;
@@ -14,7 +15,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
@@ -43,6 +43,18 @@ public class FlowLensAutoConfiguration implements WebSocketConfigurer {
         this.wsHandler = wsHandler;
     }
 
+    // ── CGLIB safety ──────────────────────────────────────────────────────────
+
+    /**
+     * Automatically prevents {@code AopConfigException: No visible constructors}
+     * for any third-party bean that uses a private constructor (singleton/registry
+     * pattern). Must be {@code static} so it is instantiated before regular beans.
+     */
+    @Bean
+    public static CglibSafetyPostProcessor flowLensCglibSafetyPostProcessor() {
+        return new CglibSafetyPostProcessor();
+    }
+
     // ── Core store ─────────────────────────────────────────────────────────────
 
     @Bean
@@ -64,13 +76,19 @@ public class FlowLensAutoConfiguration implements WebSocketConfigurer {
         registry.addHandler(wsHandler, "/flow-lens/ws").setAllowedOrigins("*");
     }
 
-    // ── AOP aspect ─────────────────────────────────────────────────────────────
+    // ── AOP aspects ────────────────────────────────────────────────────────────
 
     @Bean
     @ConditionalOnMissingBean
     public FlowLensAspect flowLensAspect(TraceStore traceStore) {
         LOG.info("[FlowLens] Auto-configured — intercepting API / Consumer / Scheduler entry points");
         return new FlowLensAspect(traceStore, wsHandler);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public FlowLensExecutorAspect flowLensExecutorAspect() {
+        return new FlowLensExecutorAspect();
     }
 
     // ── Endpoint discovery ────────────────────────────────────────────────────
@@ -107,7 +125,7 @@ public class FlowLensAutoConfiguration implements WebSocketConfigurer {
                                       staticCallAnalyzer, mermaidGenerator);
     }
 
-    // ── CORS + UI routing ──────────────────────────────────────────────────────
+    // ── CORS ───────────────────────────────────────────────────────────────────
 
     @Bean
     public WebMvcConfigurer flowLensWebConfigurer() {
@@ -118,17 +136,10 @@ public class FlowLensAutoConfiguration implements WebSocketConfigurer {
                     .allowedOrigins("*")
                     .allowedMethods("GET", "POST", "DELETE", "OPTIONS");
             }
-
-            /**
-             * /flow-lens        → redirect to /flow-lens/
-             * /flow-lens/       → forward  to /flow-lens/index.html
-             * (index.html is served from META-INF/resources/flow-lens/ by Spring Boot)
-             */
-            @Override
-            public void addViewControllers(ViewControllerRegistry registry) {
-                registry.addRedirectViewController("/flow-lens", "/flow-lens/");
-                registry.addViewController("/flow-lens/").setViewName("forward:/flow-lens/index.html");
-            }
+            // NOTE: /flow-lens and /flow-lens/ routing is handled directly by
+            // FlowLensController @GetMapping methods, which have higher priority
+            // than addViewControllers (SimpleUrlHandlerMapping) and therefore
+            // beat application wildcard routes such as @GetMapping("/{id}").
         };
     }
 }

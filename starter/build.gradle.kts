@@ -7,7 +7,7 @@ plugins {
 }
 
 group   = "cloud.dnlabz.flowlens"
-version = "1.0.0"
+version = "1.1.0"
 
 dependencyManagement {
     imports {

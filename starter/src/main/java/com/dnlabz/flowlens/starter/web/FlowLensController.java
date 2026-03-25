@@ -7,6 +7,7 @@ import com.dnlabz.flowlens.starter.model.DiscoveredEndpoint;
 import com.dnlabz.flowlens.starter.model.TraceRecord;
 import com.dnlabz.flowlens.starter.store.TraceStore;
 import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -19,8 +20,21 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@RestController
-@RequestMapping("/flow-lens/api")
+/**
+ * FlowLens dashboard + API controller.
+ *
+ * <p>Uses {@code @Controller} (not {@code @RestController}) so that the UI
+ * routing methods can return redirect/forward view names while the API methods
+ * use {@code @ResponseBody}.</p>
+ *
+ * <p>The dashboard routes ({@code /flow-lens} and {@code /flow-lens/}) are
+ * registered here as explicit {@code @GetMapping}s on
+ * {@code RequestMappingHandlerMapping} (order 0). This ensures they take
+ * priority over any application-level wildcard routes such as
+ * {@code @GetMapping("/{id}")} that would otherwise steal the request and
+ * produce a {@code NumberFormatException}.</p>
+ */
+@Controller
 public class FlowLensController {
 
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
@@ -44,14 +58,43 @@ public class FlowLensController {
         this.mermaidGenerator   = mermaidGenerator;
     }
 
+    // ── Dashboard UI routing ──────────────────────────────────────────────────
+
+    /**
+     * {@code GET /flow-lens} → redirect to {@code /flow-lens/}.
+     * Registered as a real MVC mapping so it beats wildcard /{id} routes.
+     * The redirect URL is built from the incoming request so it preserves any
+     * context path automatically.
+     */
+    @GetMapping("/flow-lens")
+    public String dashboardRedirect() {
+        // Spring's redirect: view name automatically prepends the context path,
+        // so this works whether server.servlet.context-path is set or not.
+        return "redirect:/flow-lens/";
+    }
+
+    /**
+     * {@code GET /flow-lens/} → forward to the embedded {@code index.html}.
+     * Spring Boot serves META-INF/resources/flow-lens/index.html as a static
+     * resource under the path {@code /flow-lens/index.html}.
+     */
+    @GetMapping("/flow-lens/")
+    public String dashboardIndex() {
+        return "forward:/flow-lens/index.html";
+    }
+
+    // ── REST API ──────────────────────────────────────────────────────────────
+
     /** Returns all stored traces, newest first. */
-    @GetMapping("/traces")
+    @GetMapping("/flow-lens/api/traces")
+    @ResponseBody
     public List<TraceRecord> getTraces() {
         return traceStore.getAll();
     }
 
     /** Returns a single trace by its ID. */
-    @GetMapping("/traces/{id}")
+    @GetMapping("/flow-lens/api/traces/{id}")
+    @ResponseBody
     public ResponseEntity<TraceRecord> getTrace(@PathVariable String id) {
         TraceRecord record = traceStore.getById(id);
         return record != null
@@ -60,7 +103,8 @@ public class FlowLensController {
     }
 
     /** Clears all stored traces and notifies WebSocket clients. */
-    @DeleteMapping("/traces")
+    @DeleteMapping("/flow-lens/api/traces")
+    @ResponseBody
     public ResponseEntity<Void> clearTraces() {
         traceStore.clear();
         wsHandler.broadcastClear();
@@ -68,15 +112,17 @@ public class FlowLensController {
     }
 
     /** Health / ping endpoint for the dashboard connection check. */
-    @GetMapping("/ping")
+    @GetMapping("/flow-lens/api/ping")
+    @ResponseBody
     public String ping() {
         return "ok";
     }
 
     /** Returns all discovered entry points (pre-populated before any execution). */
-    @GetMapping("/endpoints")
+    @GetMapping("/flow-lens/api/endpoints")
+    @ResponseBody
     public List<DiscoveredEndpoint> getEndpoints() {
-        return endpointDiscovery.discover();
+        return endpointDiscovery.discoverEndpoints();
     }
 
     /**
@@ -86,7 +132,8 @@ public class FlowLensController {
      *
      * @param id  the endpoint id: "fully.qualified.ClassName#methodName"
      */
-    @GetMapping("/diagram")
+    @GetMapping("/flow-lens/api/diagram")
+    @ResponseBody
     public ResponseEntity<Map<String, Object>> getDiagram(@RequestParam String id) {
         int sep = id.lastIndexOf('#');
         if (sep < 0 || sep == id.length() - 1) {
@@ -97,7 +144,7 @@ public class FlowLensController {
         String methodName = id.substring(sep + 1);
 
         // Find the matching discovered endpoint for label / type metadata
-        DiscoveredEndpoint ep = endpointDiscovery.discover().stream()
+        DiscoveredEndpoint ep = endpointDiscovery.discoverEndpoints().stream()
             .filter(e -> e.getId().equals(id))
             .findFirst()
             .orElseGet(() -> new DiscoveredEndpoint(
@@ -124,7 +171,8 @@ public class FlowLensController {
      *
      * <p>Only {@code http://} and {@code https://} target URLs are accepted.
      */
-    @PostMapping("/proxy")
+    @PostMapping("/flow-lens/api/proxy")
+    @ResponseBody
     public ResponseEntity<Map<String, Object>> proxy(@RequestBody ProxyRequest req)
             throws IOException, InterruptedException {
 

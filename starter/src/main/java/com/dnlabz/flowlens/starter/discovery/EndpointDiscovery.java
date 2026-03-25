@@ -33,8 +33,31 @@ public class EndpointDiscovery implements ApplicationContextAware {
         this.ctx = applicationContext;
     }
 
-    /** Scans all beans and returns a sorted list of discovered entry points. */
-    public List<DiscoveredEndpoint> discover() {
+    /**
+     * Returns {@code true} when the class was loaded from a dependency JAR
+     * (anything whose code-source URL ends in {@code .jar}) rather than from
+     * the application's own compiled classes directory.
+     */
+    private static boolean isFromDependencyJar(Class<?> cls) {
+        try {
+            java.security.ProtectionDomain pd = cls.getProtectionDomain();
+            if (pd == null) return false;
+            java.security.CodeSource cs = pd.getCodeSource();
+            if (cs == null) return false;
+            java.net.URL loc = cs.getLocation();
+            if (loc == null) return false;
+            String path = loc.toString();
+            // Classes from dependency JARs have a .jar URL.
+            // Application classes are in a directory (file://.../classes/) or
+            // inside the nested !/BOOT-INF/classes/ entry of a fat JAR — which
+            // Spring Boot's classloader presents as a directory-like URL, not .jar.
+            return path.endsWith(".jar") || path.contains(".jar!/");
+        } catch (Exception ignored) {
+            return false; // if we cannot determine, include it
+        }
+    }
+
+    public List<DiscoveredEndpoint> discoverEndpoints() {
         List<DiscoveredEndpoint> result = new ArrayList<>();
         Set<String> seen = new HashSet<>();
 
@@ -65,11 +88,24 @@ public class EndpointDiscovery implements ApplicationContextAware {
                 continue;
             }
 
+            // Skip classes that live inside a dependency JAR — only expose
+            // endpoints defined in the application's own compiled classes.
+            if (isFromDependencyJar(targetClass)) {
+                continue;
+            }
+
             for (Method method : targetClass.getMethods()) {
                 // Skip Object methods and synthetic/bridge methods
                 if (OBJECT_METHODS.contains(method.getName())) continue;
                 if (method.isBridge() || method.isSynthetic()) continue;
                 if (method.getDeclaringClass() == Object.class) continue;
+
+                // Skip methods inherited from a parent class that lives in a
+                // dependency JAR. The application class may extend a library base
+                // controller; we only want endpoints actually declared in the
+                // application's own code, not the inherited ones.
+                if (method.getDeclaringClass() != targetClass
+                        && isFromDependencyJar(method.getDeclaringClass())) continue;
 
                 EntryPointType type = detectType(method, targetClass);
                 if (type == null) continue;

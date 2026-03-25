@@ -53,6 +53,24 @@ public class FlowLensAspect {
     /** Human-readable label for the active trace entry point. */
     private final ThreadLocal<String> labelLocal = new ThreadLocal<>();
 
+    /**
+     * Cross-thread propagation context.
+     *
+     * <p>When a trace is active on a thread, this holds the {@link TraceContext}
+     * for that trace.  Because it is an {@link InheritableThreadLocal}, any new
+     * thread created while a trace is active (e.g. via {@code @Async}, a thread
+     * pool, or an explicit {@code new Thread(...)}) automatically inherits a
+     * reference to the same context.  The child thread can then attach its spans
+     * as children of whatever span was current at the moment of hand-off, giving
+     * a complete cross-thread call tree without any instrumentation of executors.
+     *
+     * <p>For reusable thread pools (where inheritance does not apply),
+     * {@link FlowLensExecutorAspect} intercepts task submission and explicitly
+     * sets this value on the worker thread before the task runs.
+     */
+    static final InheritableThreadLocal<TraceContext> propagationLocal =
+        new InheritableThreadLocal<>();
+
     // ── Dependencies ──────────────────────────────────────────────────────────
 
     private final TraceStore traceStore;
@@ -86,7 +104,37 @@ public class FlowLensAspect {
         Deque<SpanBuilder> stack = stackLocal.get();
 
         if (stack.isEmpty()) {
-            // ── Depth 0: decide whether to start a trace ─────────────────────
+            // ── No active trace on this thread ────────────────────────────────
+
+            // Check if a parent trace was propagated from another thread
+            // (e.g. via @Async, CompletableFuture, a thread pool task, etc.)
+            TraceContext inherited = propagationLocal.get();
+            if (inherited != null && !inherited.isFinished()) {
+                // Attach this whole sub-call as an async child of the parent span
+                SpanBuilder asyncChild = new SpanBuilder(
+                    pjp.getTarget().getClass().getName(),
+                    pjp.getSignature().getName());
+                inherited.attachChild(asyncChild);
+                stack.push(asyncChild);
+
+                boolean error = false;
+                try {
+                    return pjp.proceed();
+                } catch (Throwable t) {
+                    error = true;
+                    throw t;
+                } finally {
+                    stack.pop();
+                    asyncChild.finish(error);
+                    // Clear so this thread does not re-attach on subsequent calls
+                    // that are not triggered by the same parent
+                    if (stack.isEmpty()) {
+                        propagationLocal.remove();
+                    }
+                }
+            }
+
+            // ── Depth 0: decide whether to start a brand-new trace ────────────
             EntryPointType type = detectEntryPoint(pjp);
             if (type == null) {
                 // Not a recognised entry point — execute without tracing
@@ -102,6 +150,10 @@ public class FlowLensAspect {
                 pjp.getSignature().getName());
             stack.push(root);
 
+            // Publish the trace context so child threads can attach their spans
+            TraceContext ctx = new TraceContext(root);
+            propagationLocal.set(ctx);
+
             boolean error = false;
             try {
                 return pjp.proceed();
@@ -110,6 +162,8 @@ public class FlowLensAspect {
                 throw t;
             } finally {
                 stack.pop();
+                ctx.markFinished();          // child threads must not attach after this
+                propagationLocal.remove();
                 if (stack.isEmpty()) {
                     // Trace complete — build and publish the record
                     TraceSpan rootSpan = root.build(error);
@@ -127,13 +181,19 @@ public class FlowLensAspect {
             }
 
         } else {
-            // ── Depth > 0: nested call — attach as child of parent ────────────
+            // ── Depth > 0: nested call on the same thread ─────────────────────
             SpanBuilder current = new SpanBuilder(
                 pjp.getTarget().getClass().getName(),
                 pjp.getSignature().getName());
             // Add as child of the current top of the stack (the parent span)
             stack.peek().addChild(current);
             stack.push(current);
+
+            // Keep the propagation context pointing at the innermost span so
+            // that if this call submits async work the new thread attaches under
+            // the correct parent (the span that spawned it, not the root).
+            TraceContext ctx = propagationLocal.get();
+            if (ctx != null) ctx.setCurrentSpan(current);
 
             boolean error = false;
             try {
@@ -144,6 +204,11 @@ public class FlowLensAspect {
             } finally {
                 stack.pop();
                 current.finish(error);
+                // Restore parent as current after this span finishes
+                if (ctx != null) {
+                    SpanBuilder parent = stack.isEmpty() ? null : stack.peek();
+                    if (parent != null) ctx.setCurrentSpan(parent);
+                }
             }
         }
     }
@@ -296,11 +361,58 @@ public class FlowLensAspect {
         return new String[0];
     }
 
+    // ── Inner helper: TraceContext ────────────────────────────────────────────
+
+    /**
+     * Shared mutable context for a single trace that may span multiple threads.
+     *
+     * <p>Holds a reference to whichever {@link SpanBuilder} is "current" on
+     * the originating thread; child threads inherit this reference via
+     * {@link InheritableThreadLocal} and attach their spans to it.
+     *
+     * <p>All mutations are guarded by the instance monitor to make concurrent
+     * child-thread {@code attachChild} calls safe.</p>
+     */
+    static final class TraceContext {
+        private volatile SpanBuilder currentSpan;
+        private volatile boolean finished = false;
+
+        TraceContext(SpanBuilder root) {
+            this.currentSpan = root;
+        }
+
+        synchronized void attachChild(SpanBuilder child) {
+            if (!finished && currentSpan != null) {
+                currentSpan.addChild(child);
+            }
+        }
+
+        synchronized void setCurrentSpan(SpanBuilder span) {
+            if (!finished) this.currentSpan = span;
+        }
+
+        /** Returns a snapshot of the current span for use by executor wrappers. */
+        synchronized SpanBuilder captureCurrentSpan() {
+            return currentSpan;
+        }
+
+        void markFinished() {
+            this.finished = true;
+        }
+
+        boolean isFinished() {
+            return finished;
+        }
+    }
+
     // ── Inner helper: SpanBuilder ─────────────────────────────────────────────
 
     /**
      * Mutable builder accumulated by the advice; converted to an immutable
      * {@link TraceSpan} when the method returns.
+     *
+     * <p>{@code addChild} is {@code synchronized} because cross-thread spans
+     * may be added concurrently from multiple child threads.</p>
      */
     static final class SpanBuilder {
         private final String className;
@@ -310,7 +422,8 @@ public class FlowLensAspect {
         private boolean      error;
 
         /** Pending children — added during execution via {@link #addChild}. */
-        private final java.util.List<SpanBuilder> childBuilders = new java.util.ArrayList<>();
+        private final java.util.List<SpanBuilder> childBuilders =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
 
         SpanBuilder(String className, String methodName) {
             this.className  = className;
@@ -318,7 +431,7 @@ public class FlowLensAspect {
             this.startNs    = System.nanoTime();
         }
 
-        void addChild(SpanBuilder child) {
+        synchronized void addChild(SpanBuilder child) {
             childBuilders.add(child);
         }
 
