@@ -1,0 +1,40 @@
+# ─── Gradle ───────────────────────────────────────────────────────────────────
+.gradle/
+build/
+out/
+
+# ─── Wrapper (keep gradlew scripts, ignore downloaded distribution) ──────────
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+!gradlew
+!gradlew.bat
+
+# ─── IDEs ─────────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/settings.json
+.classpath
+.project
+.settings/
+
+# ─── macOS ────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+
+# ─── Native Image ─────────────────────────────────────────────────────────────
+# GraalVM agent-generated config (committed intentionally, so NOT ignored)
+# backend/build/native → ignored via build/ above
+
+# ─── Spring Boot ──────────────────────────────────────────────────────────────
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# ─── Next.js / Node ───────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+frontend/.env.*.local
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+.env

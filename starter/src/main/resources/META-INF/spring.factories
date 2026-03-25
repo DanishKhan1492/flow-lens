@@ -1,0 +1,5 @@
+# Spring Boot auto-configuration registration (Spring Boot 2.7.x compatible).
+# Spring Boot 3.x+ ignores this file for auto-configurations and uses
+# META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports instead.
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+  com.dnlabz.flowlens.starter.config.FlowLensAutoConfiguration
